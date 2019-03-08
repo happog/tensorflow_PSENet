@@ -5,7 +5,7 @@ from tensorflow.contrib import slim
 from utils.utils_tool import logger, cfg
 
 tf.app.flags.DEFINE_integer('input_size', 512, '')
-tf.app.flags.DEFINE_integer('batch_size_per_gpu', 8, '')
+tf.app.flags.DEFINE_integer('batch_size_per_gpu', 16, '')
 tf.app.flags.DEFINE_integer('num_readers', 32, '')
 tf.app.flags.DEFINE_float('learning_rate', 0.00001, '')
 tf.app.flags.DEFINE_integer('max_steps', 100000, '')
@@ -86,7 +86,6 @@ def main(argv=None):
     opt = tf.train.AdamOptimizer(learning_rate)
     # opt = tf.train.MomentumOptimizer(learning_rate, 0.9)
 
-
     # split
     input_images_split = tf.split(input_images, len(gpus))
     input_seg_maps_split = tf.split(input_seg_maps, len(gpus))
@@ -123,6 +122,9 @@ def main(argv=None):
     summary_writer = tf.summary.FileWriter(FLAGS.checkpoint_path, tf.get_default_graph())
 
     init = tf.global_variables_initializer()
+    vn = [v.name for v in tf.trainable_variables()]
+    for name in vn:
+        print name
 
     if FLAGS.pretrained_model_path is not None:
         variable_restore_op = slim.assign_from_checkpoint_fn(FLAGS.pretrained_model_path, slim.get_trainable_variables(),
@@ -162,7 +164,7 @@ def main(argv=None):
                     step, ml, tl, avg_time_per_step, avg_examples_per_second))
 
             if step % FLAGS.save_checkpoint_steps == 0:
-                saver.save(sess, FLAGS.checkpoint_path + 'model.ckpt', global_step=global_step)
+                saver.save(sess, os.path.join(FLAGS.checkpoint_path,'model.ckpt'), global_step=global_step)
 
             if step % FLAGS.save_summary_steps == 0:
                 _, tl, summary_str = sess.run([train_op, total_loss, summary_op], feed_dict={input_images: data[0],

@@ -10,7 +10,6 @@ from nets.resnet import resnet_v1
 
 FLAGS = tf.app.flags.FLAGS
 
-#TODO:bilinear or nearest_neighbor?
 def unpool(inputs, rate):
     return tf.image.resize_bilinear(inputs, size=[tf.shape(inputs)[1]*rate,  tf.shape(inputs)[2]*rate])
 
@@ -29,41 +28,6 @@ def mean_image_subtraction(images, means=[123.68, 116.78, 103.94]):
         channels[i] -= means[i]
     return tf.concat(axis=3, values=channels)
 
-def build_feature_pyramid(C, weight_decay):
-
-    '''
-    reference: https://github.com/CharlesShang/FastMaskRCNN
-    build P2, P3, P4, P5
-    :return: multi-scale feature map
-    '''
-
-    feature_pyramid = {}
-    with tf.variable_scope('build_feature_pyramid'):
-        with slim.arg_scope([slim.conv2d], weights_regularizer=slim.l2_regularizer(weight_decay)):
-            feature_pyramid['P5'] = slim.conv2d(C['C5'],
-                                                num_outputs=256,
-                                                kernel_size=[1, 1],
-                                                stride=1,
-                                                scope='build_P5')
-
-            feature_pyramid['P6'] = slim.max_pool2d(feature_pyramid['P5'],
-                                                    kernel_size=[2, 2], stride=2, scope='build_P6')
-            # P6 is down sample of P5
-
-            for layer in range(4, 1, -1):
-                p, c = feature_pyramid['P' + str(layer + 1)], C['C' + str(layer)]
-                up_sample_shape = tf.shape(c)
-                up_sample = tf.image.resize_nearest_neighbor(p, [up_sample_shape[1], up_sample_shape[2]],
-                                                             name='build_P%d/up_sample_nearest_neighbor' % layer)
-
-                c = slim.conv2d(c, num_outputs=256, kernel_size=[1, 1], stride=1,
-                                scope='build_P%d/reduce_dimension' % layer)
-                p = up_sample + c
-                p = slim.conv2d(p, 256, kernel_size=[3, 3], stride=1,
-                                padding='SAME', scope='build_P%d/avoid_aliasing' % layer)
-                feature_pyramid['P' + str(layer)] = p
-    return feature_pyramid
-
 def model(images, outputs = 6, weight_decay=1e-5, is_training=True):
     '''
     define the model, we use slim's implemention of resnet
@@ -73,18 +37,7 @@ def model(images, outputs = 6, weight_decay=1e-5, is_training=True):
     with slim.arg_scope(resnet_v1.resnet_arg_scope(weight_decay=weight_decay)):
         logits, end_points = resnet_v1.resnet_v1_50(images, is_training=is_training, scope='resnet_v1_50')
 
-    #no non-linearities in FPN article
-    feature_pyramid = build_feature_pyramid(end_points, weight_decay=weight_decay)
-    #unpool sample P
-    P_concat = []
-    for i in range(3, 1, -1):
-        P_concat.append(unpool(feature_pyramid['P'+str(i+2)], 2**i))
-    P_concat.append(feature_pyramid['P2'])
-    #F = C(P2,P3,P4,P5)
-    F = tf.concat(P_concat, axis=-1)
-
-    #reduce to 256 channels
-    with tf.variable_scope('feature_results'):
+    with tf.variable_scope('feature_fusion', values=[end_points.values]):
         batch_norm_params = {
             'decay': 0.997,
             'epsilon': 1e-5,
@@ -96,11 +49,29 @@ def model(images, outputs = 6, weight_decay=1e-5, is_training=True):
                             normalizer_fn=slim.batch_norm,
                             normalizer_params=batch_norm_params,
                             weights_regularizer=slim.l2_regularizer(weight_decay)):
-            F = slim.conv2d(F, 256, 3)
+            f = [end_points['pool5'], end_points['pool4'],
+                 end_points['pool3'], end_points['pool2']]
+            #TODO:no need a list
+            g = [None, None, None, None]
+            h = [None, None, None, None]
+            num_outputs = [None, 128, 64, 32]
+            for i in range(4):
+                if i == 0:
+                    h[i] = f[i]
+                else:
+                    c1_1 = slim.conv2d(tf.concat([g[i - 1], f[i]], axis=-1), num_outputs[i], 1)
+                    h[i] = slim.conv2d(c1_1, num_outputs[i], 3)
+                if i <= 2:
+                    g[i] = unpool(h[i], 2)
+                else:
+                    #F
+                    g[i] = slim.conv2d(h[i], num_outputs[i], 3)
+    with tf.variable_scope('Output'):
         with slim.arg_scope([slim.conv2d],
                             weights_regularizer=slim.l2_regularizer(weight_decay),
                             activation_fn=None):
-            S = slim.conv2d(F, outputs, 1)
+            S = slim.conv2d(g[3], outputs, 1)
+
     up_S = unpool(S, 4)
     seg_S_pred = tf.nn.sigmoid(up_S)
 

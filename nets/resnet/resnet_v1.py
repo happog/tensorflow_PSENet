@@ -193,7 +193,7 @@ def resnet_v1(inputs,
                     net = resnet_utils.conv2d_same(net, 64, 7, stride=2, scope='conv1')
                     net = slim.max_pool2d(net, [3, 3], stride=2, scope='pool1')
 
-                    net = slim.utils.collect_named_outputs(end_points_collection, 'C2', net)
+                    net = slim.utils.collect_named_outputs(end_points_collection, 'pool2', net)
 
                 net = resnet_utils.stack_blocks_dense(net, blocks, output_stride)
 
@@ -201,12 +201,12 @@ def resnet_v1(inputs,
 
                 # end_points['pool2'] = end_points['resnet_v1_50/pool1/MaxPool:0']
                 try:
-                    end_points['C3'] = end_points['resnet_v1_50/block1']
-                    end_points['C4'] = end_points['resnet_v1_50/block2']
+                    end_points['pool3'] = end_points['resnet_v1_50/block1']
+                    end_points['pool4'] = end_points['resnet_v1_50/block2']
                 except:
-                    end_points['C3'] = end_points['Detection/resnet_v1_50/block1']
-                    end_points['C4'] = end_points['Detection/resnet_v1_50/block2']
-                end_points['C5'] = net
+                    end_points['pool3'] = end_points['Detection/resnet_v1_50/block1']
+                    end_points['pool4'] = end_points['Detection/resnet_v1_50/block2']
+                end_points['pool5'] = net
                 # if global_pool:
                 #     # Global average pooling.
                 #     net = tf.reduce_mean(net, [1, 2], name='pool5', keep_dims=True)
